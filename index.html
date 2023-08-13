@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>
+        Game of Life
+    </title>
+    <style>
+        :root {
+            font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+            line-height: 1.5;
+            font-weight: 400;
+
+            color-scheme: light dark;
+            color: rgba(255, 255, 255, 0.87);
+            background-color: #242424;
+        }
+
+        header {
+            margin: 16px;
+            display: flex;
+            gap: 24px;
+            flex-direction: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        h1 {
+            min-width: 180px;
+            font-size: 24px;
+        }
+
+        .info {
+            margin-left: auto;
+        }
+
+        main {
+            margin: 24px;
+            /* min-height: 100%;
+            min-width: 100%; */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        canvas {
+            margin-left: 24px;
+            margin-right: 24px;
+            box-sizing: border-box;
+            border: 1px solid #000;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>Game of Live</h1>
+        <div>
+            <label for="width">Ширина: </label>
+            <input id="width" type="number" value="200" />
+        </div>
+
+        <div>
+            <label for="height">Высота: </label>
+            <input id="height" type="number" value="200" />
+        </div>
+        <div>
+            <button id="start">Старт</button>
+            <button id="stop">Стоп</button>
+            <button id="step">Шаг</button>
+            <button id="reset">Чистый лист</button>
+            <button id="random">Рандом (42% живых клеток)</button>
+        </div>
+        <div className="info">
+            <span>Время: </span>
+
+            <span id="time"></span>
+        </div>
+    </header>
+    <main>
+        <canvas id="canvas"></canvas>
+    </main>
+</body>
+
+<script>
+    const colorField = '#632e2e';
+    const colorPoint = '#000';
+
+    const getField = (width, height) => {
+        const field = [];
+        for (let y = 0; y < height; y++) {
+            field[y] = []
+            for (let x = 0; x < width; x++) {
+                field[y][x] = false
+            }
+        }
+        return field
+    }
+
+    const randomField = (width, height) => {
+        const field = [];
+        for (let y = 0; y < height; y++) {
+            field[y] = []
+            for (let x = 0; x < width; x++) {
+                field[y][x] = Math.random() * 100 > 58
+            }
+        }
+        return field;
+    }
+
+    class View {
+        constructor(width = 200, height = 200) {
+            this.canvas = document.getElementById('canvas');
+            this.context = this.canvas.getContext('2d');
+            this.scale = 4;
+            this.canvas.width = width * this.scale;
+            this.canvas.height = height * this.scale;
+            this.context.fillStyle = colorField
+            this.context.fillRect(0, 0, width * this.scale, height * this.scale);
+        }
+
+
+        setWidth(width) {
+            this.canvas.width = width * this.scale
+            this.context.fillStyle = colorField
+            this.context.fillRect(0, 0, width * this.scale, this.canvas.height);
+        }
+
+        setHeight(height) {
+            this.canvas.height = height * this.scale;
+            this.context.fillStyle = colorField
+            this.context.fillRect(0, 0, this.canvas.width, height * this.scale);
+        }
+        getScale() {
+            return this.scale;
+        };
+
+        drawPoints(data) {
+            data.forEach((row, y) => row.forEach((cell, x) => {
+                if (cell) {
+                    this.context.fillStyle = colorPoint
+                    this.context.fillRect(
+                        x * this.scale,
+                        y * this.scale,
+                        this.scale,
+                        this.scale,
+                    )
+                }
+                if (!cell) {
+                    this.context.fillStyle = colorField
+                    this.context.fillRect(
+                        x * this.scale,
+                        y * this.scale,
+                        this.scale,
+                        this.scale,
+                    )
+                }
+            }))
+        }
+    }
+
+    class Game {
+        #field;
+        constructor(
+            width = 200,
+            height = 200
+        ) {
+            this.width = width;
+            this.height = height;
+            this.#field = getField(this.width, this.height);
+            this.stepNumber = 0;
+            this.intervalId = null;
+            this.fieldObservers = [];
+            this.algTime = "";
+        }
+
+        subscribe(listener) {
+            this.fieldObservers.push(listener)
+        }
+
+        unsubscribe(listener) {
+            const index = this.fieldObservers.indexOf(listener);
+            if (index !== -1) {
+                this.fieldObservers.splice(index, 1);
+            }
+        }
+
+        notify() {
+            this.fieldObservers.forEach(listener => listener(this.#field))
+        }
+
+        getAlgTime() {
+            return this.algTime
+        }
+
+        setNewField(width, height) {
+            this.stopGame();
+            this.#field = getField(width, height);
+            this.notify();
+        }
+
+        setWidth(width) {
+            this.width = width;
+            this.setNewField(width, this.height);
+            this.notify();
+        }
+
+        setHeight(height) {
+            this.height = height
+            this.setNewField(this.width, height);
+            this.notify();
+        }
+
+        setStatePoint(x, y, state) {
+            this.#field[y][x] = !!state;
+            this.notify();
+        }
+
+        toggleStatePoint(x, y) {
+            this.setStatePoint(x, y, !this.#field[y][x]);
+        }
+
+        getNeighbors(x, y) {
+            let prevX = x - 1
+            if (prevX < 0) {
+                prevX = this.#field[0].length - 1
+            }
+
+            let nextX = x + 1
+            if (nextX === this.#field[0].length) {
+                nextX = 0
+            }
+
+            let prevY = y - 1
+            if (prevY < 0) {
+                prevY = this.#field.length - 1
+            }
+
+            let nextY = y + 1
+            if (nextY === this.#field.length) {
+                nextY = 0
+            }
+
+            return [
+                this.#field[prevY][prevX],
+                this.#field[prevY][x],
+                this.#field[prevY][nextX],
+                this.#field[y][prevX],
+                this.#field[y][nextX],
+                this.#field[nextY][prevX],
+                this.#field[nextY][x],
+                this.#field[nextY][nextX],
+            ]
+        }
+
+        getDeadOrAlive(x, y) {
+            const neighbors = this.getNeighbors(x, y)
+            const numberOfAliveNeighbors = neighbors.filter(Boolean).length
+
+            if (this.#field[y][x]) {
+                return !(numberOfAliveNeighbors < 2 || numberOfAliveNeighbors > 3)
+            }
+
+            return numberOfAliveNeighbors === 3
+        }
+
+        step() {
+            const start = new Date();
+            this.stepNumber++;
+            const prevState = this.#field;
+            const nextState = prevState.map((row, y) => row.map((_, x) => this.getDeadOrAlive(x, y)))
+            this.#field = nextState;
+            this.notify();
+            const end = new Date();
+            this.algTime = `${(end - start)} мс.`
+            if (nextState.every((row, y) => row.every((value, x) => value === prevState[y][x]))) {
+                this.stopGame();
+            }
+
+        }
+
+        startGame() {
+            this.stepNumber = 0;
+            this.intervalId = setInterval(() => {
+                {
+                    this.step();
+                }
+            }, 50);
+        }
+
+        stopGame() {
+            clearInterval(this.intervalId);
+            this.intervalId = null;
+        }
+
+        clearField() {
+            this.#field = getField(this.width, this.height);
+            this.notify();
+        }
+
+        random() {
+            this.#field = randomField(this.width, this.height);
+            this.notify()
+        }
+
+    }
+
+    const view = new View();
+    const game = new Game();
+
+    const drawPoints = view.drawPoints.bind(view)
+
+    game.subscribe(drawPoints);
+
+    document.getElementById("width").addEventListener('change', (e) => {
+        game.setWidth(Number(e.target.value));
+        view.setWidth(Number(e.target.value));
+    })
+    document.getElementById("height").addEventListener('change', (e) => {
+        game.setHeight(Number(e.target.value));
+        view.setHeight(Number(e.target.value));
+    }
+    )
+
+    document.getElementById('step').addEventListener('click', () => { game.step() });
+
+    document.getElementById('start').addEventListener('click', () => {
+        game.startGame();
+    })
+
+    document.getElementById('stop').addEventListener('click', () => {
+        game.stopGame();
+    })
+
+    document.getElementById('reset').addEventListener('click', () => {
+        game.stopGame();
+        game.clearField();
+    })
+
+    document.getElementById('random').addEventListener('click', () => {
+        game.random();
+    })
+
+
+    let isMouseDown = false;
+    prevX = null;
+    prevY = null
+
+    const canvas = document.getElementById('canvas')
+    canvas.addEventListener('mousedown', event => {
+        isMouseDown = true
+    })
+
+    canvas.addEventListener('mousemove', event => {
+        const scale = view.getScale();
+        const x = Math.floor(event.offsetX / scale)
+        const y = Math.floor(event.offsetY / scale)
+
+        try {
+            if (isMouseDown && x !== prevX && y !== prevY) {
+                game.toggleStatePoint(x, y);
+            }
+        }
+        catch (e) {
+            isMouseDown = false
+        }
+    })
+
+    canvas.addEventListener('mouseup', event => {
+        isMouseDown = false
+    })
+
+    const time = document.getElementById("time");
+
+    setInterval(() => {
+        time.innerHTML = game.getAlgTime()
+    }, 50)
+
+
+</script>
+
+</html>
